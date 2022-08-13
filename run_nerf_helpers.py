@@ -151,13 +151,56 @@ class NeRF(nn.Module):
 
 # Ray helpers
 def get_rays(H, W, K, c2w):
+    """
+    input:
+    H: height of the trianing image
+    W: width of the trianing image
+    K: intrinsics parameters of camera
+    c2w: extrinsics parameters of camera
+    output:
+    rays_d: the angle of an image (in world space), i.e., the direction of a ray, e.g., rays_d[0,0,:] represents the direction of [0,0] pixel in world space
+    rays_o: the bias of an image (in world space), i.e., the original flat of a ray
+    """
+    # i, j are meshgrids of a training image
+    # e.g., H = W = 400, i.t() and j.t() should have a dimension of [400, 400]:
+    # print(i)
+    # tensor([[  0.,   1.,   2.,  ..., 397., 398., 399.],
+    #    [  0.,   1.,   2.,  ..., 397., 398., 399.],
+    #    ...,
+    #    [  0.,   1.,   2.,  ..., 397., 398., 399.],
+    #    [  0.,   1.,   2.,  ..., 397., 398., 399.]])
+    # print(j)
+    # tensor([[  0.,   0.,   0.,  ...,   0.,   0.,   0.],
+    #    [  1.,   1.,   1.,  ...,   1.,   1.,   1.],
+    #    ...,
+    #    [  398.,   398.,   398.,  ..., 398., 398., 398.],
+    #    [  399.,   399.,   399.,  ..., 399., 399., 399.]])
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))  # pytorch's meshgrid has indexing='ij'
     i = i.t()
     j = j.t()
+
+    # transfer the pixel space to camera space, dir has dimension of [400, 400, 3]
+    # print(dirs[:,:,0])
+    # tensor([[-1.8018, -1.7928, -1.7838,  ...,  1.7748,  1.7838,  1.7928],
+    #    [-1.8018, -1.7928, -1.7838,  ...,  1.7748,  1.7838,  1.7928],
+    #    ...,
+    #    [-1.8018, -1.7928, -1.7838,  ...,  1.7748,  1.7838,  1.7928],
+    #    [-1.8018, -1.7928, -1.7838,  ...,  1.7748,  1.7838,  1.7928]])
+    # print(dirs[:,:,1])
+    # tensor([[ 1.8018,  1.8018,  1.8018,  ...,  1.8018,  1.8018,  1.8018],
+    #    [-1.7748, -1.7748, -1.7748,  ..., -1.7748, -1.7748, -1.7748],
+    #    ...,
+    #    [-1.7748, -1.7748, -1.7748,  ..., -1.7748, -1.7748, -1.7748],
+    #    [-1.7928, -1.7928, -1.7928,  ..., -1.7928, -1.7928, -1.7928]])
     dirs = torch.stack([(i-K[0][2])/K[0][0], -(j-K[1][2])/K[1][1], -torch.ones_like(i)], -1)
-    # Rotate ray directions from camera frame to the world frame
+    
+    # Rotate ray directions from camera space to the world space
+    # c2w[:3,:3] is the rotation matrix of extrinsics parameters of camera
+    # final three dimensions represent the x, y, z
     rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
-    # Translate camera frame's origin to the world frame. It is the origin of all rays.
+
+    # Transform to the world space. It is the origin of all rays
+    # c2w[:3,-1] is the transformation matrix of extrinsics parameters of camera
     rays_o = c2w[:3,-1].expand(rays_d.shape)
     return rays_o, rays_d
 
@@ -237,3 +280,19 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
     return samples
+
+if __name__=='__main__':
+
+    H = 400
+    W = 400
+    focal = 111
+    K = np.array([
+        [focal, 0, 0.5*W],
+        [0, focal, 0.5*H],
+        [0, 0, 1]
+    ])
+    pose = torch.randn(4, 4)
+
+    rays_o, rays_d = get_rays(H, W, K, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
+
+    print(rays_o.shape, rays_d.shape) # torch.Size([400, 400, 3]) torch.Size([400, 400, 3])

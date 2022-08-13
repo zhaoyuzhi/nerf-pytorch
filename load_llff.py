@@ -117,11 +117,6 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     print('Loaded image data', imgs.shape, poses[:,-1,0])
     return poses, bds, imgs
 
-    
-            
-            
-    
-
 def normalize(x):
     return x / np.linalg.norm(x)
 
@@ -149,7 +144,6 @@ def poses_avg(poses):
     return c2w
 
 
-
 def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
     render_poses = []
     rads = np.array(list(rads) + [1.])
@@ -161,7 +155,6 @@ def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
         render_poses.append(np.concatenate([viewmatrix(z, up, c), hwf], 1))
     return render_poses
     
-
 
 def recenter_poses(poses):
 
@@ -242,7 +235,6 @@ def spherify_poses(poses, bds):
 
 def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_zflat=False):
     
-
     poses, bds, imgs = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
     print('Loaded', basedir, bds.min(), bds.max())
     

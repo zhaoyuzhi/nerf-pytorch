@@ -37,6 +37,13 @@ def pose_spherical(theta, phi, radius):
 def load_blender_data(basedir, half_res=False, testskip=1):
     splits = ['train', 'val', 'test']
     metas = {}
+
+    # read json file as a dictionary data structure
+    # tag 'frames' contains the information for every single frame
+    # tag 'rotation' seems not used
+    # tag 'camera_angle_x' contains one value, which is the horizontal field of view
+    #print(metas['train']['frames'][0])
+    #print(metas['train']['camera_angle_x'])
     for s in splits:
         with open(os.path.join(basedir, 'transforms_{}.json'.format(s)), 'r') as fp:
             metas[s] = json.load(fp)
@@ -52,19 +59,26 @@ def load_blender_data(basedir, half_res=False, testskip=1):
             skip = 1
         else:
             skip = testskip
-            
+
+        # read frames one by one
+        # the resulting numpy arrays should have dimensions: imgs: (num_of_frames, 800, 800, 4) poses: (num_of_frames, 4, 4)
         for frame in meta['frames'][::skip]:
             fname = os.path.join(basedir, frame['file_path'] + '.png')
-            imgs.append(imageio.imread(fname))
-            poses.append(np.array(frame['transform_matrix']))
+            imgs.append(imageio.imread(fname)) # dimension of the lego image: [800, 800, 4]
+            poses.append(np.array(frame['transform_matrix'])) # [4, 4]
+
+        # images are normalized into range of [0,1]
         imgs = (np.array(imgs) / 255.).astype(np.float32) # keep all 4 channels (RGBA)
         poses = np.array(poses).astype(np.float32)
         counts.append(counts[-1] + imgs.shape[0])
         all_imgs.append(imgs)
         all_poses.append(poses)
     
+    # since train/val/test imgs and poses are saved togother, we need to segment them
     i_split = [np.arange(counts[i], counts[i+1]) for i in range(3)]
     
+    # concatnate all train/val/test imgs and poses: imgs: (num_of_frames, 800, 800, 4) poses: (num_of_frames, 4, 4)
+    # at this time, num_of_frames = num_of_train_frame + num_of_val_frame + num_of_test_frame
     imgs = np.concatenate(all_imgs, 0)
     poses = np.concatenate(all_poses, 0)
     
@@ -72,12 +86,15 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     camera_angle_x = float(meta['camera_angle_x'])
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
-    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,40+1)[:-1]], 0)
+    # print(np.linspace(-180, 180, 40+1)[:-1])
+    # [-180. -171. -162. -153. -144. -135. -126. -117. -108.  -99.  -90.  -81. -72.  -63.  -54.  -45.  -36.  -27.  -18.   -9.    0.    9.   18.   27.
+    # 36.   45.   54.   63.   72.   81.   90.   99.  108.  117.  126.  135. 144.  153.  162.  171.]
+    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 40+1)[:-1]], 0)
     
     if half_res:
         H = H//2
         W = W//2
-        focal = focal/2.
+        focal = focal/2. # focal = .5 * W / np.tan(.5 * camera_angle_x), therefore, it should be divided by 2
 
         imgs_half_res = np.zeros((imgs.shape[0], H, W, 4))
         for i, img in enumerate(imgs):
@@ -85,7 +102,12 @@ def load_blender_data(basedir, half_res=False, testskip=1):
         imgs = imgs_half_res
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
 
-        
     return imgs, poses, render_poses, [H, W, focal], i_split
 
+if __name__=='__main__':
 
+    angles = np.linspace(-180, 180, 40+1)[:-1]
+    
+    for angle in angles:
+        re = pose_spherical(angle, -30.0, 4.0)
+        print(angle, re)

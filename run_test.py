@@ -74,18 +74,16 @@ def render(H, W, K, chunk=1024*32, rays=None, c2w=None, ndc=True,
     Args:
       H: int. Height of image in pixels.
       W: int. Width of image in pixels.
-      focal: float. Focal length of pinhole camera. (it is in matrix K)
-      chunk: int. Maximum number of rays to process simultaneously. Used to
-        control maximum memory usage. Does not affect final results.
-      rays: array of shape [2, batch_size, 3]. Ray origin and direction for
-        each example in batch.
+      K: array of shape [3, 3], Pixel-to-camera transformation matrix.
+      focal: float. Focal length of pinhole camera (recorded in K).
+      chunk: int. Maximum number of rays to process simultaneously. Used to control maximum memory usage. Does not affect final results.
+      rays: array of shape [2, batch_size, 3]. Ray origin and direction for each example in batch.
       c2w: array of shape [3, 4]. Camera-to-world transformation matrix.
       ndc: bool. If True, represent ray origin, direction in NDC coordinates.
       near: float or array of shape [batch_size]. Nearest distance for a ray.
       far: float or array of shape [batch_size]. Farthest distance for a ray.
-      use_viewdirs: bool. If True, use viewing direction of a point in space in model.
-      c2w_staticcam: array of shape [3, 4]. If not None, use this transformation matrix for 
-       camera while using other c2w argument for viewing directions.
+      use_viewdirs: bool. If True, use viewing direction of a point in space in model. Default False because the provided data is 3D image instead of 5D.
+      c2w_staticcam: array of shape [3, 4]. If not None, use this transformation matrix for camera while using other c2w argument for viewing directions.
     Returns:
       rgb_map: [batch_size, 3]. Predicted RGB values for rays.
       disp_map: [batch_size]. Disparity map. Inverse of depth.
@@ -95,7 +93,7 @@ def render(H, W, K, chunk=1024*32, rays=None, c2w=None, ndc=True,
     if c2w is not None:
         # special case to render full image
         rays_o, rays_d = get_rays(H, W, K, c2w)
-    else: # nomally rays are provided
+    else:
         # use provided ray batch
         rays_o, rays_d = rays
 
@@ -108,7 +106,8 @@ def render(H, W, K, chunk=1024*32, rays=None, c2w=None, ndc=True,
         viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
         viewdirs = torch.reshape(viewdirs, [-1,3]).float()
 
-    sh = rays_d.shape # [..., 3]
+    sh = rays_d.shape # [H, W, 3]
+    print(ndc)
     if ndc:
         # for forward facing scenes
         rays_o, rays_d = ndc_rays(H, W, K[0][0], 1., rays_o, rays_d)
@@ -614,7 +613,7 @@ def train():
     H, W = int(H), int(W)
     hwf = [H, W, focal]
 
-    # intrinsics parameter of a pinhole camera
+    # inter-parameter of a pinhole camera
     if K is None:
         K = np.array([
             [focal, 0, 0.5*W],
@@ -674,7 +673,7 @@ def train():
 
             return
 
-    # Prepare raybatch tensor if batching random rays; default use_batching == False
+    # Prepare raybatch tensor if batching random rays
     N_rand = args.N_rand
     use_batching = not args.no_batching
     if use_batching:
@@ -703,9 +702,6 @@ def train():
 
     N_iters = 200000 + 1
     print('Begin')
-    print('TRAIN views are', i_train) # blender lego: [ 0  1  2  3  ......  98  99]
-    print('VAL views are', i_val) # blender lego: [ 100  101  102  103  ......  111  112]
-    print('TEST views are', i_test) # blender lego: [ 113  114  115  116  ......  136  137]
 
     # Summary writers
     # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
@@ -788,7 +784,7 @@ def train():
         rgb, disp, acc, extras = render(H, W, K, chunk=args.chunk, rays=batch_rays,
                                                 verbose=i < 10, retraw=True,
                                                 **render_kwargs_train)
-
+     
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
         trans = extras['raw'][...,-1]
@@ -802,7 +798,8 @@ def train():
 
         loss.backward()
         optimizer.step()
-
+           
+    """
         # NOTE: IMPORTANT!
         ###   update learning rate   ###
         decay_rate = 0.1
@@ -855,49 +852,9 @@ def train():
     
         if i%args.i_print==0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
-        """
-            print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
-            print('iter time {:.05f}'.format(dt))
-
-            with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_print):
-                tf.contrib.summary.scalar('loss', loss)
-                tf.contrib.summary.scalar('psnr', psnr)
-                tf.contrib.summary.histogram('tran', trans)
-                if args.N_importance > 0:
-                    tf.contrib.summary.scalar('psnr0', psnr0)
-
-
-            if i%args.i_img==0:
-
-                # Log a rendered validation view to Tensorboard
-                img_i=np.random.choice(i_val)
-                target = images[img_i]
-                pose = poses[img_i, :3,:4]
-                with torch.no_grad():
-                    rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, c2w=pose,
-                                                        **render_kwargs_test)
-
-                psnr = mse2psnr(img2mse(rgb, target))
-
-                with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_img):
-
-                    tf.contrib.summary.image('rgb', to8b(rgb)[tf.newaxis])
-                    tf.contrib.summary.image('disp', disp[tf.newaxis,...,tf.newaxis])
-                    tf.contrib.summary.image('acc', acc[tf.newaxis,...,tf.newaxis])
-
-                    tf.contrib.summary.scalar('psnr_holdout', psnr)
-                    tf.contrib.summary.image('rgb_holdout', target[tf.newaxis])
-
-
-                if args.N_importance > 0:
-
-                    with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_img):
-                        tf.contrib.summary.image('rgb0', to8b(extras['rgb0'])[tf.newaxis])
-                        tf.contrib.summary.image('disp0', extras['disp0'][tf.newaxis,...,tf.newaxis])
-                        tf.contrib.summary.image('z_std', extras['z_std'][tf.newaxis,...,tf.newaxis])
-        """
 
         global_step += 1
+    """
 
 
 if __name__=='__main__':
